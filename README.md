@@ -92,7 +92,7 @@ Esta chave permite que a aplicação leia os arquivos da sua pasta no Google Dri
     ```
 
 5.  **Na interface do aplicativo:**
-    -   Insira sua **Google API Key** na barra lateral.
+    -   A aplicação irá carregar a API Key automaticamente do seu arquivo `.env`.
     -   Clique no botão **"Sincronizar"**.
     -   Aguarde o processamento e comece a conversar!
 

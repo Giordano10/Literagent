@@ -7,6 +7,7 @@ import io
 import json
 import re
 from datetime import datetime
+from dotenv import load_dotenv
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
@@ -23,11 +24,15 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
+# Carrega as variáveis de ambiente do arquivo .env
+load_dotenv()
+
 # --- CONSTANTES ---
 FAISS_INDEX_PATH = "faiss_index"
 FAISS_MANIFEST_FILE = "faiss_manifest.json"
 CREDENTIALS_FILE = "credentials.json"
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+GDRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1wYDn0Bvscp8zMmIJwf3q-uPT4VowDCU8?usp=drive_link"
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Assistente de Livros", page_icon="📚", layout="wide")
@@ -38,7 +43,6 @@ def authenticate_gdrive():
     """Autentica na API do Google Drive usando a conta de serviço."""
     if not os.path.exists(CREDENTIALS_FILE):
         st.error(f"Arquivo de credenciais '{CREDENTIALS_FILE}' não encontrado.")
-        st.error("Por favor, siga as instruções de configuração e coloque o arquivo na raiz do projeto.")
         return None
     try:
         creds = service_account.Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
@@ -57,15 +61,10 @@ def list_gdrive_files(service, folder_id):
     """Lista os arquivos PDF em uma pasta do Google Drive."""
     try:
         query = f"'{folder_id}' in parents and mimeType='application/pdf' and trashed=false"
-        results = service.files().list(
-            q=query,
-            pageSize=100,
-            fields="nextPageToken, files(id, name, modifiedTime)"
-        ).execute()
+        results = service.files().list(q=query, pageSize=100, fields="nextPageToken, files(id, name, modifiedTime)").execute()
         return {item['id']: {'name': item['name'], 'modified_time': item['modifiedTime']} for item in results.get('files', [])}
     except HttpError as e:
         st.error(f"Erro ao listar arquivos do Google Drive: {e}")
-        st.error("Verifique se a URL da pasta está correta e se a conta de serviço tem permissão de 'Leitor'.")
         return {}
 
 def download_gdrive_files_as_streams(service, file_ids):
@@ -120,7 +119,7 @@ def get_conversational_rag_chain(vector_store, api_key):
     ])
     history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
     qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", "Você é um assistente especialista e deve responder perguntas com base nos documentos PDF fornecidos.\nUse os trechos de contexto a seguir para responder à pergunta.\nSe você não sabe a resposta ou a informação não está no contexto, diga \"Com base nos meus documentos, não encontrei uma resposta para isso.\", não tente inventar uma resposta.\nResponda de forma concisa e direta.\n\nContexto:\n{context}"),
+        ("system", "Você é um assistente especialista... {context}"),
         MessagesPlaceholder("chat_history"),
         ("human", "{input}"),
     ])
@@ -140,95 +139,86 @@ if "conversation" not in st.session_state:
 st.header("Assistente de Livros 📚")
 st.write("Converse com seus documentos do Google Drive.")
 
+# Carrega a chave de API do ambiente
+api_key = os.getenv("GOOGLE_API_KEY")
+
 with st.sidebar:
     st.subheader("Configuração")
-    api_key = st.text_input("Google API Key", type="password", help="Obtenha sua chave no Google AI Studio.")
-    
     if api_key:
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=api_key)
-        
-        # Carregar base de conhecimento local se existir
-        if os.path.exists(FAISS_INDEX_PATH) and st.session_state.conversation is None:
-            with st.spinner("Carregando base de conhecimento local..."):
-                try:
-                    vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
-                    st.session_state.conversation = get_conversational_rag_chain(vector_store, api_key)
-                    st.sidebar.success("Base de conhecimento local carregada!")
-                except Exception as e:
-                    st.sidebar.error(f"Erro ao carregar base local: {e}")
+        st.success("API Key do Google carregada do .env!")
+    else:
+        st.error("API Key do Google não encontrada.")
+        st.error("Crie um arquivo .env na raiz do projeto e adicione a linha: GOOGLE_API_KEY='SUA_CHAVE'")
+        st.stop()
 
-        st.subheader("Sincronizar com Google Drive")
-        gdrive_folder_url = "https://drive.google.com/drive/folders/1wYDn0Bvscp8zMmIJwf3q-uPT4VowDCU8?usp=drive_link"
-        st.info("Pasta do Drive definida no código.")
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=api_key)
+    
+    if os.path.exists(FAISS_INDEX_PATH) and st.session_state.conversation is None:
+        with st.spinner("Carregando base de conhecimento local..."):
+            try:
+                vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
+                st.session_state.conversation = get_conversational_rag_chain(vector_store, api_key)
+                st.sidebar.success("Base de conhecimento local carregada!")
+            except Exception as e:
+                st.sidebar.error(f"Erro ao carregar base local: {e}")
 
-        if st.button("Sincronizar"):
-            if not gdrive_folder_url:
-                st.warning("Por favor, insira a URL da pasta do Google Drive.")
-            else:
-                folder_id = get_folder_id_from_url(gdrive_folder_url)
-                if not folder_id:
-                    st.error("URL da pasta inválida. Use o formato '.../folders/ID_DA_PASTA'.")
-                else:
-                    with st.spinner("Sincronizando com Google Drive..."):
-                        gdrive_service = authenticate_gdrive()
-                        if gdrive_service:
-                            # 1. Listar arquivos no Drive
-                            st.write("1/5 - Listando arquivos no Google Drive...")
-                            drive_files = list_gdrive_files(gdrive_service, folder_id)
-                            
-                            # 2. Comparar com o manifesto local
-                            st.write("2/5 - Verificando arquivos novos ou modificados...")
-                            manifest = load_manifest()
-                            files_to_process = {}
-                            for file_id, file_info in drive_files.items():
-                                if file_id not in manifest or datetime.fromisoformat(file_info['modified_time'][:-1]) > datetime.fromisoformat(manifest[file_id]['modified_time'][:-1]):
-                                    files_to_process[file_id] = file_info
-                            
-                            if not files_to_process:
-                                st.success("Sua base de conhecimento já está atualizada!")
-                            else:
-                                # 3. Baixar e processar novos arquivos
-                                st.write(f"3/5 - Baixando {len(files_to_process)} arquivo(s)...")
-                                new_pdf_streams = download_gdrive_files_as_streams(gdrive_service, files_to_process.keys())
-                                
-                                st.write("4/5 - Processando texto e criando embeddings...")
-                                new_raw_text = get_pdf_text(new_pdf_streams)
-                                new_text_chunks = get_text_chunks(new_raw_text)
-                                
-                                # 5. Atualizar ou criar Vector Store
-                                st.write("5/5 - Atualizando a base de conhecimento...")
-                                if os.path.exists(FAISS_INDEX_PATH):
-                                    vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
-                                    vector_store.add_texts(new_text_chunks)
-                                else:
-                                    vector_store = FAISS.from_texts(new_text_chunks, embedding=embeddings)
-                                
-                                vector_store.save_local(FAISS_INDEX_PATH)
-                                save_manifest(drive_files) # Salva o estado atual de todos os arquivos
-                                st.session_state.conversation = get_conversational_rag_chain(vector_store, api_key)
-                                st.success(f"{len(files_to_process)} arquivo(s) processado(s) e base de conhecimento atualizada!")
-                                st.rerun()
+    st.subheader("Sincronizar com Google Drive")
+    st.info("Pasta do Drive definida no código.")
+
+    if st.button("Sincronizar"):
+        folder_id = get_folder_id_from_url(GDRIVE_FOLDER_URL)
+        if not folder_id:
+            st.error("URL da pasta inválida no código.")
+        else:
+            with st.spinner("Sincronizando com Google Drive..."):
+                gdrive_service = authenticate_gdrive()
+                if gdrive_service:
+                    st.write("1/5 - Listando arquivos...")
+                    drive_files = list_gdrive_files(gdrive_service, folder_id)
+                    st.write("2/5 - Verificando arquivos...")
+                    manifest = load_manifest()
+                    files_to_process = {fid: finfo for fid, finfo in drive_files.items() if fid not in manifest or datetime.fromisoformat(finfo['modified_time'][:-1]) > datetime.fromisoformat(manifest[fid]['modified_time'][:-1])}
+                    
+                    if not files_to_process:
+                        st.success("Base de conhecimento já está atualizada!")
+                    else:
+                        st.write(f"3/5 - Baixando {len(files_to_process)} arquivo(s)...")
+                        new_pdf_streams = download_gdrive_files_as_streams(gdrive_service, files_to_process.keys())
+                        st.write("4/5 - Processando texto...")
+                        new_raw_text = get_pdf_text(new_pdf_streams)
+                        new_text_chunks = get_text_chunks(new_raw_text)
+                        st.write("5/5 - Atualizando a base...")
+                        if os.path.exists(FAISS_INDEX_PATH):
+                            vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
+                            vector_store.add_texts(new_text_chunks)
+                        else:
+                            vector_store = FAISS.from_texts(new_text_chunks, embedding=embeddings)
+                        
+                        vector_store.save_local(FAISS_INDEX_PATH)
+                        save_manifest(drive_files)
+                        st.session_state.conversation = get_conversational_rag_chain(vector_store, api_key)
+                        st.success("Base de conhecimento atualizada!")
+                        st.rerun()
 
 # --- ÁREA DE CHAT ---
 st.subheader("Chat")
 
 if not api_key:
-    st.warning("Por favor, insira sua Google API Key na barra lateral para começar.")
+    st.warning("Configure sua API Key no arquivo .env")
 elif st.session_state.conversation is None:
-    st.info("Sincronize com uma pasta do Google Drive para começar a conversar.")
+    st.info("Sincronize com o Google Drive para começar.")
 
 for msg in st.session_state.get("chat_history", []):
     with st.chat_message(msg.type):
         st.markdown(msg.content)
 
-if user_question := st.chat_input("Qual a sua pergunta sobre os documentos?"):
+if user_question := st.chat_input("Qual a sua pergunta?"):
     if st.session_state.conversation:
-        with st.chat_message("user"):
-            st.markdown(user_question)
+        with st.chat_message("user"): st.markdown(user_question)
         config = {"configurable": {"session_id": "streamlit_user"}}
         with st.chat_message("assistant"):
             with st.spinner("Pensando..."):
                 response = st.session_state.conversation.invoke({"input": user_question}, config)
                 st.markdown(response["answer"])
     else:
-        st.warning("Por favor, sincronize com o Google Drive primeiro.")
+        st.warning("Por favor, sincronize com o Google Drive.")
