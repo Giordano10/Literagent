@@ -10,7 +10,8 @@ A interface é construída com Streamlit e o backend utiliza os modelos de lingu
 - **Sincronização Inteligente:** Processa apenas arquivos novos ou modificados, evitando reprocessamento desnecessário a cada execução.
 - **Base de Conhecimento Persistente:** Salva o índice de vetores (FAISS) localmente para um carregamento rápido e eficiente.
 - **Chat com Memória:** Mantém o contexto da conversa atual para permitir perguntas de acompanhamento.
-- **Segurança:** Mantém as chaves e credenciais fora do controle de versão através do uso de `.gitignore`.
+- **Ajuste de Criatividade:** Controle a "temperatura" do modelo com um slider para obter respostas mais factuais ou mais criativas.
+- **Segurança:** Mantém as chaves e credenciais fora do controle de versão através do uso de `.env` e `.gitignore`.
 
 ## Arquitetura
 
@@ -20,7 +21,7 @@ O fluxo de dados da aplicação segue os seguintes passos:
 2.  **Sincronização:** Lista os PDFs na pasta do Drive e compara com um manifesto local (`faiss_manifest.json`) para encontrar arquivos novos/modificados.
 3.  **Processamento:** Os novos arquivos são baixados, seu texto é extraído (com PyMuPDF) e dividido em `chunks` (com LangChain).
 4.  **Embedding e Armazenamento:** Os `chunks` de texto são transformados em vetores (embeddings) pelo modelo `text-embedding-004` da Google e armazenados em um índice FAISS local (`faiss_index`).
-5.  **Conversação:** O usuário interage com a aplicação. A pergunta é usada para buscar os `chunks` mais relevantes no índice FAISS, que são então enviados como contexto para o modelo `gemini-2.5-pro` gerar uma resposta.
+5.  **Conversação:** O usuário interage com a aplicação. A pergunta é usada para buscar os `chunks` mais relevantes no índice FAISS, que são então enviados como contexto para o modelo `gemini-1.5-pro` gerar uma resposta.
 
 ---
 
@@ -28,12 +29,18 @@ O fluxo de dados da aplicação segue os seguintes passos:
 
 Antes de executar a aplicação, são necessários dois tipos de chaves do Google.
 
-### 1. API Key do Google AI
+### 1. API Key do Google AI (via .env)
 
-Esta chave é para usar os modelos de linguagem (Gemini). 
+Esta chave é para usar os modelos de linguagem (Gemini) e é carregada de forma segura através de um arquivo de ambiente.
 
 - **Como obter:** Vá ao [Google AI Studio](https://aistudio.google.com/app/apikey) e crie uma nova chave de API.
-- **Onde usar:** Você irá inseri-la diretamente na interface do aplicativo.
+- **Onde usar:**
+    1.  Crie um arquivo chamado `.env` na raiz do projeto.
+    2.  Dentro dele, adicione a seguinte linha, substituindo `SUA_CHAVE_AQUI` pela sua chave real:
+        ```
+        GOOGLE_API_KEY="SUA_CHAVE_AQUI"
+        ```
+O arquivo `.gitignore` já está configurado para impedir que este arquivo seja enviado ao seu repositório.
 
 ### 2. Credenciais para o Google Drive
 
@@ -93,7 +100,8 @@ Esta chave permite que a aplicação leia os arquivos da sua pasta no Google Dri
 
 5.  **Na interface do aplicativo:**
     -   A aplicação irá carregar a API Key automaticamente do seu arquivo `.env`.
-    -   Clique no botão **"Sincronizar"**.
+    -   Na barra lateral, ajuste a **Temperatura do Modelo** se desejar.
+    -   Clique no botão **"Sincronizar"** para carregar/atualizar seus documentos.
     -   Aguarde o processamento e comece a conversar!
 
 ## Estrutura do Projeto
@@ -101,6 +109,7 @@ Esta chave permite que a aplicação leia os arquivos da sua pasta no Google Dri
 -   `Assistente_livros.py`: O arquivo principal da aplicação Streamlit.
 -   `requirements.txt`: Lista de dependências do projeto.
 -   `.gitignore`: Arquivo para ignorar arquivos sensíveis e desnecessários.
+-   `.env`: (Ignorado pelo Git) Arquivo para armazenar a `GOOGLE_API_KEY`.
 -   `credentials.json`: (Ignorado pelo Git) Chave de acesso para a API do Google Drive.
 -   `faiss_index/`: (Ignorado pelo Git) Pasta onde o índice de vetores é salvo.
 -   `faiss_manifest.json`: (Ignorado pelo Git) Registro dos arquivos já processados.

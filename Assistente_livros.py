@@ -40,14 +40,13 @@ st.set_page_config(page_title="Assistente de Livros", page_icon="📚", layout="
 # --- GOOGLE DRIVE & LÓGICA DE DADOS ---
 
 def authenticate_gdrive():
-    """Autentica na API do Google Drive usando a conta de serviço."""
+    """Autentica na API do Google Drive."""
     if not os.path.exists(CREDENTIALS_FILE):
-        st.error(f"Arquivo de credenciais '{CREDENTIALS_FILE}' não encontrado.")
+        st.error(f"Arquivo '{CREDENTIALS_FILE}' não encontrado.")
         return None
     try:
         creds = service_account.Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
-        service = build('drive', 'v3', credentials=creds)
-        return service
+        return build('drive', 'v3', credentials=creds)
     except Exception as e:
         st.error(f"Falha na autenticação com o Google Drive: {e}")
         return None
@@ -64,36 +63,33 @@ def list_gdrive_files(service, folder_id):
         results = service.files().list(q=query, pageSize=100, fields="nextPageToken, files(id, name, modifiedTime)").execute()
         return {item['id']: {'name': item['name'], 'modified_time': item['modifiedTime']} for item in results.get('files', [])}
     except HttpError as e:
-        st.error(f"Erro ao listar arquivos do Google Drive: {e}")
+        st.error(f"Erro ao listar arquivos do Drive: {e}")
         return {}
 
 def download_gdrive_files_as_streams(service, file_ids):
     """Baixa arquivos do Drive e retorna como streams de bytes."""
-    pdf_streams = []
+    streams = []
     for file_id in file_ids:
         request = service.files().get_media(fileId=file_id)
         fh = io.BytesIO()
         downloader = MediaIoBaseDownload(fh, request)
         done = False
         while not done:
-            status, done = downloader.next_chunk()
+            _, done = downloader.next_chunk()
         fh.seek(0)
-        pdf_streams.append(fh)
-    return pdf_streams
+        streams.append(fh)
+    return streams
 
 def load_manifest():
     """Carrega o manifesto de arquivos processados."""
-    if os.path.exists(FAISS_MANIFEST_FILE):
-        with open(FAISS_MANIFEST_FILE, 'r') as f:
-            return json.load(f)
-    return {}
+    return json.load(open(FAISS_MANIFEST_FILE, 'r')) if os.path.exists(FAISS_MANIFEST_FILE) else {}
 
 def save_manifest(data):
     """Salva o manifesto de arquivos processados."""
     with open(FAISS_MANIFEST_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
-# --- FUNÇÕES CORE (Adaptadas) ---
+# --- FUNÇÕES CORE ---
 
 def get_pdf_text(pdf_docs_streams):
     """Extrai texto de uma lista de streams de PDF."""
@@ -108,38 +104,36 @@ def get_text_chunks(text):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=2500, chunk_overlap=200, length_function=len)
     return text_splitter.split_text(text)
 
-def get_conversational_rag_chain(vector_store, api_key):
-    """Cria a cadeia de conversação RAG."""
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=api_key, temperature=0.3)
+def get_conversational_rag_chain(vector_store, api_key, temperature):
+    """Cria a cadeia de conversação RAG com a temperatura especificada."""
+    llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=api_key, temperature=temperature)
     retriever = vector_store.as_retriever()
     contextualize_q_prompt = ChatPromptTemplate.from_messages([
-        ("system", "Dado um histórico de chat e a última pergunta do usuário, que pode fazer referência ao contexto no histórico, formule uma pergunta independente que possa ser entendida sem o histórico. NÃO responda à pergunta, apenas a reformule se necessário, caso contrário, retorne-a como está."),
+        ("system", "Dado um histórico de chat e a última pergunta do usuário... reformule a pergunta para ser independente."),
         MessagesPlaceholder("chat_history"),
         ("human", "{input}"),
     ])
     history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
     qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", "Você é um assistente especialista... {context}"),
+        ("system", "Você é um assistente especialista... Use o seguinte contexto para responder.\nContexto: {context}"),
         MessagesPlaceholder("chat_history"),
         ("human", "{input}"),
     ])
     question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
     rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
     return RunnableWithMessageHistory(
-        rag_chain,
-        lambda session_id: StreamlitChatMessageHistory(key="chat_history"),
+        rag_chain, lambda session_id: StreamlitChatMessageHistory(key="chat_history"),
         input_messages_key="input", history_messages_key="chat_history", output_messages_key="answer",
     )
 
 # --- INTERFACE DO STREAMLIT ---
 
-if "conversation" not in st.session_state:
-    st.session_state.conversation = None
-
 st.header("Assistente de Livros 📚")
 st.write("Converse com seus documentos do Google Drive.")
 
-# Carrega a chave de API do ambiente
+if "conversation" not in st.session_state:
+    st.session_state.conversation = None
+
 api_key = os.getenv("GOOGLE_API_KEY")
 
 with st.sidebar:
@@ -147,20 +141,24 @@ with st.sidebar:
     if api_key:
         st.success("API Key do Google carregada do .env!")
     else:
-        st.error("API Key do Google não encontrada.")
-        st.error("Crie um arquivo .env na raiz do projeto e adicione a linha: GOOGLE_API_KEY='SUA_CHAVE'")
+        st.error("API Key do Google não encontrada no .env!")
         st.stop()
+
+    st.subheader("Ajuste de Criatividade")
+    model_temperature = st.slider(
+        "Temperatura do Modelo", min_value=0.0, max_value=1.0, value=0.3, step=0.05,
+        help="Valores baixos são mais factuais; valores altos são mais criativos."
+    )
 
     embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=api_key)
     
-    if os.path.exists(FAISS_INDEX_PATH) and st.session_state.conversation is None:
-        with st.spinner("Carregando base de conhecimento local..."):
-            try:
-                vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
-                st.session_state.conversation = get_conversational_rag_chain(vector_store, api_key)
-                st.sidebar.success("Base de conhecimento local carregada!")
-            except Exception as e:
-                st.sidebar.error(f"Erro ao carregar base local: {e}")
+    # Recria a cadeia de conversação a cada interação para capturar a nova temperatura
+    if os.path.exists(FAISS_INDEX_PATH):
+        try:
+            vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
+            st.session_state.conversation = get_conversational_rag_chain(vector_store, api_key, model_temperature)
+        except Exception as e:
+            st.error(f"Erro ao carregar base local: {e}")
 
     st.subheader("Sincronizar com Google Drive")
     st.info("Pasta do Drive definida no código.")
@@ -173,21 +171,19 @@ with st.sidebar:
             with st.spinner("Sincronizando com Google Drive..."):
                 gdrive_service = authenticate_gdrive()
                 if gdrive_service:
-                    st.write("1/5 - Listando arquivos...")
                     drive_files = list_gdrive_files(gdrive_service, folder_id)
-                    st.write("2/5 - Verificando arquivos...")
                     manifest = load_manifest()
                     files_to_process = {fid: finfo for fid, finfo in drive_files.items() if fid not in manifest or datetime.fromisoformat(finfo['modified_time'][:-1]) > datetime.fromisoformat(manifest[fid]['modified_time'][:-1])}
                     
                     if not files_to_process:
                         st.success("Base de conhecimento já está atualizada!")
                     else:
-                        st.write(f"3/5 - Baixando {len(files_to_process)} arquivo(s)...")
+                        st.write(f"Baixando {len(files_to_process)} novo(s) arquivo(s)...")
                         new_pdf_streams = download_gdrive_files_as_streams(gdrive_service, files_to_process.keys())
-                        st.write("4/5 - Processando texto...")
                         new_raw_text = get_pdf_text(new_pdf_streams)
                         new_text_chunks = get_text_chunks(new_raw_text)
-                        st.write("5/5 - Atualizando a base...")
+                        
+                        st.write("Atualizando a base de conhecimento...")
                         if os.path.exists(FAISS_INDEX_PATH):
                             vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
                             vector_store.add_texts(new_text_chunks)
@@ -196,17 +192,15 @@ with st.sidebar:
                         
                         vector_store.save_local(FAISS_INDEX_PATH)
                         save_manifest(drive_files)
-                        st.session_state.conversation = get_conversational_rag_chain(vector_store, api_key)
+                        st.session_state.conversation = get_conversational_rag_chain(vector_store, api_key, model_temperature)
                         st.success("Base de conhecimento atualizada!")
                         st.rerun()
 
 # --- ÁREA DE CHAT ---
 st.subheader("Chat")
 
-if not api_key:
-    st.warning("Configure sua API Key no arquivo .env")
-elif st.session_state.conversation is None:
-    st.info("Sincronize com o Google Drive para começar.")
+if st.session_state.conversation is None:
+    st.info("Sincronize com o Google Drive para carregar a base de conhecimento.")
 
 for msg in st.session_state.get("chat_history", []):
     with st.chat_message(msg.type):
@@ -221,4 +215,4 @@ if user_question := st.chat_input("Qual a sua pergunta?"):
                 response = st.session_state.conversation.invoke({"input": user_question}, config)
                 st.markdown(response["answer"])
     else:
-        st.warning("Por favor, sincronize com o Google Drive.")
+        st.warning("A base de conhecimento não está carregada. Sincronize com o Drive.")
