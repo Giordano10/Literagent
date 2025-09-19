@@ -1,0 +1,29 @@
+# Git files
+.git/
+.gitignore
+
+# Docker files
+Dockerfile
+.dockerignore
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Local credentials and secrets
+credentials.json
+.env
+
+# Local data stores and indexes
+faiss_index/
+faiss_manifest.json
+
+# IDE / Editor specific
+.vscode/
+.idea/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
