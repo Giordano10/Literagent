@@ -20,7 +20,7 @@ O fluxo de dados da aplicação segue os seguintes passos:
 2.  **Sincronização:** Lista os PDFs na pasta do Drive e compara com um manifesto local (`faiss_manifest.json`) para encontrar arquivos novos/modificados.
 3.  **Processamento:** Os novos arquivos são baixados, seu texto é extraído (com PyMuPDF) e dividido em `chunks` (com LangChain).
 4.  **Embedding e Armazenamento:** Os `chunks` de texto são transformados em vetores (embeddings) pelo modelo `text-embedding-004` da Google e armazenados em um índice FAISS local (`faiss_index`).
-5.  **Conversação:** O usuário interage com a aplicação. A pergunta é usada para buscar os `chunks` mais relevantes no índice FAISS, que são então enviados como contexto para o modelo `gemini-1.5-pro` gerar uma resposta.
+5.  **Conversação:** O usuário interage com a aplicação. A pergunta é usada para buscar os `chunks` mais relevantes no índice FAISS, que são então enviados como contexto para o modelo `gemini-2.5-pro` gerar uma resposta.
 
 ---
 
