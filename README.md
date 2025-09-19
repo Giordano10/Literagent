@@ -1,31 +1,70 @@
 # Assistente de Livros 📚
 
-Este projeto é um assistente de chat que utiliza a tecnologia RAG (Retrieval-Augmented Generation) para responder a perguntas sobre documentos PDF que você fornece. A interface é construída com Streamlit, e o backend utiliza os modelos de linguagem da Google e a biblioteca LangChain.
+Este projeto é um assistente de chat que utiliza a tecnologia RAG (Retrieval-Augmented Generation) para responder a perguntas sobre documentos PDF armazenados em uma pasta específica do Google Drive.
 
-## Funcionalidades
+A interface é construída com Streamlit e o backend utiliza os modelos de linguagem da Google (Gemini) e a biblioteca LangChain para orquestrar o fluxo de dados.
 
-- **Upload de Múltiplos PDFs:** Carregue um ou mais documentos PDF para análise.
-- **Chat Interativo:** Converse com um assistente de IA que responde com base no conteúdo dos seus documentos.
-- **Histórico de Conversa:** O assistente mantém o contexto da conversa para respostas mais precisas.
-- **Modelo de Linguagem Google Gemini:** Utiliza o `gemini-2.5-pro` para geração de respostas e `models/text-embedding-004` para a criação de embeddings.
+## Funcionalidades Principais
 
-## Dependências
+- **Integração com Google Drive:** Conecta-se a uma pasta do Google Drive para usar seus PDFs como base de conhecimento.
+- **Sincronização Inteligente:** Processa apenas arquivos novos ou modificados, evitando reprocessamento desnecessário a cada execução.
+- **Base de Conhecimento Persistente:** Salva o índice de vetores (FAISS) localmente para um carregamento rápido e eficiente.
+- **Chat com Memória:** Mantém o contexto da conversa atual para permitir perguntas de acompanhamento.
+- **Segurança:** Mantém as chaves e credenciais fora do controle de versão através do uso de `.gitignore`.
 
-O projeto utiliza as seguintes bibliotecas Python:
+## Arquitetura
 
-```
-streamlit
-google-generativeai
-langchain
-langchain-google-genai
-langchain-community
-pymupdf
-chromadb
-faiss-cpu
-protobuf
-```
+O fluxo de dados da aplicação segue os seguintes passos:
 
-## Instalação
+1.  **Autenticação:** O Streamlit se conecta à API do Google Drive usando um arquivo de credenciais de conta de serviço (`credentials.json`).
+2.  **Sincronização:** Lista os PDFs na pasta do Drive e compara com um manifesto local (`faiss_manifest.json`) para encontrar arquivos novos/modificados.
+3.  **Processamento:** Os novos arquivos são baixados, seu texto é extraído (com PyMuPDF) e dividido em `chunks` (com LangChain).
+4.  **Embedding e Armazenamento:** Os `chunks` de texto são transformados em vetores (embeddings) pelo modelo `text-embedding-004` da Google e armazenados em um índice FAISS local (`faiss_index`).
+5.  **Conversação:** O usuário interage com a aplicação. A pergunta é usada para buscar os `chunks` mais relevantes no índice FAISS, que são então enviados como contexto para o modelo `gemini-1.5-pro` gerar uma resposta.
+
+---
+
+## Configuração Obrigatória
+
+Antes de executar a aplicação, são necessários dois tipos de chaves do Google.
+
+### 1. API Key do Google AI
+
+Esta chave é para usar os modelos de linguagem (Gemini). 
+
+- **Como obter:** Vá ao [Google AI Studio](https://aistudio.google.com/app/apikey) e crie uma nova chave de API.
+- **Onde usar:** Você irá inseri-la diretamente na interface do aplicativo.
+
+### 2. Credenciais para o Google Drive
+
+Esta chave permite que a aplicação leia os arquivos da sua pasta no Google Drive de forma segura e autônoma.
+
+**Passo A: Habilitar a API do Google Drive**
+
+1.  Acesse o [Console do Google Cloud](https://console.cloud.google.com/apis/library/drive.googleapis.com).
+2.  Selecione um projeto (ou crie um novo).
+3.  Verifique se a **"Google Drive API"** está ativada. Se não estiver, clique em **"Ativar"**.
+
+**Passo B: Criar uma Conta de Serviço e a Chave JSON**
+
+1.  No menu do Console, vá para **"APIs e Serviços" > "Credenciais"**.
+2.  Clique em **"+ CRIAR CREDENCIAIS"** e selecione **"Conta de serviço"**.
+3.  Dê um nome para a conta (ex: `assistente-livros-agent`) e clique em **"CRIAR E CONTINUAR"**.
+4.  Pode pular a etapa de "função" clicando em **"CONTINUAR"** e depois em **"CONCLUÍDO"**.
+5.  Na lista de credenciais, encontre a conta que você criou e clique nela.
+6.  Vá para a aba **"CHAVES"**, clique em **"ADICIONAR CHAVE" > "Criar nova chave"**.
+7.  Selecione **JSON** e clique em **"CRIAR"**. Um arquivo JSON será baixado.
+
+**Passo C: Posicionar a Chave e Compartilhar a Pasta**
+
+1.  Renomeie o arquivo JSON baixado para `credentials.json`.
+2.  Mova este arquivo para a raiz do projeto (a mesma pasta onde está o `Assistente_livros.py`).
+3.  **Passo Crucial:** Abra o `credentials.json` em um editor de texto e copie o email que está no campo `"client_email"`.
+4.  Vá até a sua pasta no Google Drive, clique em **"Compartilhar"** e cole este email, garantindo que ele tenha, no mínimo, permissão de **"Leitor"**.
+
+---
+
+## Instalação e Uso
 
 1.  **Clone o repositório:**
     ```bash
@@ -36,7 +75,10 @@ protobuf
 2.  **Crie e ative um ambiente virtual:**
     ```bash
     python -m venv .venv
-    source .venv/bin/activate  # No Windows, use: .venv\Scripts\activate
+    # No Windows:
+    .venv\Scripts\activate
+    # No Linux/macOS:
+    # source .venv/bin/activate
     ```
 
 3.  **Instale as dependências:**
@@ -44,57 +86,21 @@ protobuf
     pip install -r requirements.txt
     ```
 
-4.  **Configure sua chave de API do Google:**
-    O assistente requer uma chave de API do Google para funcionar. Você pode obtê-la no [Google AI Studio](https://aistudio.google.com/app/apikey).
-
-    A aplicação irá pedir a chave na interface, ou você pode configurar uma variável de ambiente:
+4.  **Execute a aplicação:**
     ```bash
-    export GOOGLE_API_KEY="SUA_CHAVE_API"
+    streamlit run Assistente_livros.py
     ```
 
-## Como Utilizar
-
-### 1. Executando o Assistente de Chat
-
-Após a instalação, inicie a aplicação Streamlit com o seguinte comando:
-
-```bash
-streamlit run Assistente_livros.py
-```
-
-A interface web será aberta no seu navegador. Siga os passos na barra lateral:
-1.  Insira sua Google API Key.
-2.  Faça o upload dos seus arquivos PDF.
-3.  Clique no botão "Processar".
-4.  Após o processamento, você pode começar a fazer perguntas no chat.
-
-### 2. Scripts Auxiliares
-
-O projeto inclui alguns scripts úteis:
-
--   **`listar_modelos.py`**: Lista todos os modelos da API do Google Generative AI disponíveis para a sua chave.
-    ```bash
-    python listar_modelos.py
-    ```
-
--   **`verificar_ambiente.py`**: Verifica se a biblioteca `PyMuPDF` (fitz) está corretamente instalada no seu ambiente.
-    ```bash
-    python verificar_ambiente.py
-    ```
-
-### 3. Executando os Testes
-
-O projeto contém testes unitários para as funções principais. Para executá-los:
-
-```bash
-python test_assistente_livros.py
-```
+5.  **Na interface do aplicativo:**
+    -   Insira sua **Google API Key** na barra lateral.
+    -   Clique no botão **"Sincronizar"**.
+    -   Aguarde o processamento e comece a conversar!
 
 ## Estrutura do Projeto
 
 -   `Assistente_livros.py`: O arquivo principal da aplicação Streamlit.
 -   `requirements.txt`: Lista de dependências do projeto.
--   `test_assistente_livros.py`: Testes unitários para o assistente.
--   `listar_modelos.py`: Script para listar os modelos de IA disponíveis.
--   `verificar_ambiente.py`: Script para verificar a instalação do PyMuPDF.
--   `meus_livros/`: Diretório sugerido para armazenar seus PDFs.
+-   `.gitignore`: Arquivo para ignorar arquivos sensíveis e desnecessários.
+-   `credentials.json`: (Ignorado pelo Git) Chave de acesso para a API do Google Drive.
+-   `faiss_index/`: (Ignorado pelo Git) Pasta onde o índice de vetores é salvo.
+-   `faiss_manifest.json`: (Ignorado pelo Git) Registro dos arquivos já processados.
