@@ -1,0 +1,25 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Byte-compiled/optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local credentials and secrets
+# IMPORTANT: Never commit secret keys.
+credentials.json
+.env
+
+# Local data stores and indexes
+faiss_index/
+faiss_manifest.json
+
+# Streamlit configuration
+.streamlit/secrets.toml
+
+# IDE / Editor specific
+.vscode/
+.idea/
