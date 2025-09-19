@@ -1,4 +1,4 @@
-# Assistente de Livros 📚
+# LiterAgent 📚
 
 Este projeto é um assistente de chat que utiliza a tecnologia RAG (Retrieval-Augmented Generation) para responder a perguntas sobre documentos PDF armazenados em uma pasta específica do Google Drive.
 
@@ -12,6 +12,7 @@ A interface é construída com Streamlit e o backend utiliza os modelos de lingu
 - **Chat com Memória:** Mantém o contexto da conversa atual para permitir perguntas de acompanhamento.
 - **Ajuste de Criatividade:** Controle a "temperatura" do modelo com um slider para obter respostas mais factuais ou mais criativas.
 - **Segurança:** Mantém as chaves e credenciais fora do controle de versão através do uso de `.env` e `.gitignore`.
+- **Docker-ready:** Inclui um `Dockerfile` para fácil portabilidade e implantação.
 
 ## Arquitetura
 
@@ -56,7 +57,7 @@ Esta chave permite que a aplicação leia os arquivos da sua pasta no Google Dri
 
 1.  No menu do Console, vá para **"APIs e Serviços" > "Credenciais"**.
 2.  Clique em **"+ CRIAR CREDENCIAIS"** e selecione **"Conta de serviço"**.
-3.  Dê um nome para a conta (ex: `assistente-livros-agent`) e clique em **"CRIAR E CONTINUAR"**.
+3.  Dê um nome para a conta (ex: `literagent-service-account`) e clique em **"CRIAR E CONTINUAR"**.
 4.  Pode pular a etapa de "função" clicando em **"CONTINUAR"** e depois em **"CONCLUÍDO"**.
 5.  Na lista de credenciais, encontre a conta que você criou e clique nela.
 6.  Vá para a aba **"CHAVES"**, clique em **"ADICIONAR CHAVE" > "Criar nova chave"**.
@@ -65,13 +66,13 @@ Esta chave permite que a aplicação leia os arquivos da sua pasta no Google Dri
 **Passo C: Posicionar a Chave e Compartilhar a Pasta**
 
 1.  Renomeie o arquivo JSON baixado para `credentials.json`.
-2.  Mova este arquivo para a raiz do projeto (a mesma pasta onde está o `Assistente_livros.py`).
-3.  **Passo Crucial:** Abra o `credentials.json` em um editor de texto e copie o email que está no campo `"client_email"`.
-4.  Vá até a sua pasta no Google Drive, clique em **"Compartilhar"** e cole este email, garantindo que ele tenha, no mínimo, permissão de **"Leitor"**.
+2.  Mova este arquivo para a raiz do projeto.
+3.  **Passo Crucial:** Abra o `credentials.json` e copie o email do campo `"client_email"`.
+4.  Vá até a sua pasta no Google Drive, clique em **"Compartilhar"** e cole este email, garantindo permissão de **"Leitor"**.
 
 ---
 
-## Instalação e Uso
+## Instalação e Uso Local
 
 1.  **Clone o repositório:**
     ```bash
@@ -84,8 +85,6 @@ Esta chave permite que a aplicação leia os arquivos da sua pasta no Google Dri
     python -m venv .venv
     # No Windows:
     .venv\Scripts\activate
-    # No Linux/macOS:
-    # source .venv/bin/activate
     ```
 
 3.  **Instale as dependências:**
@@ -95,7 +94,7 @@ Esta chave permite que a aplicação leia os arquivos da sua pasta no Google Dri
 
 4.  **Execute a aplicação:**
     ```bash
-    streamlit run Assistente_livros.py
+    streamlit run literagent.py
     ```
 
 5.  **Na interface do aplicativo:**
@@ -104,11 +103,47 @@ Esta chave permite que a aplicação leia os arquivos da sua pasta no Google Dri
     -   Clique no botão **"Sincronizar"** para carregar/atualizar seus documentos.
     -   Aguarde o processamento e comece a conversar!
 
+---
+
+## Executando com Docker
+
+Depois de seguir a **Configuração Obrigatória** (criar os arquivos `.env` e `credentials.json`), você pode construir e executar a aplicação em um contêiner Docker.
+
+### 1. Construindo a Imagem
+
+Na raiz do projeto, execute o comando a seguir para construir a imagem. A tag `-t literagent` nomeia a imagem para facilitar o uso.
+
+```bash
+docker build -t literagent .
+```
+
+### 2. Executando o Contêiner
+
+Para executar o contêiner, você precisa passar suas credenciais de forma segura. O comando a seguir faz isso:
+
+-   `-p 8501:8501`: Mapeia a porta do seu computador para a porta do contêiner.
+-   `--env-file .env`: Passa todas as variáveis (sua `GOOGLE_API_KEY`) do seu arquivo `.env` para o contêiner.
+-   `-v .../credentials.json:/app/credentials.json:ro`: Monta o seu arquivo `credentials.json` local dentro do contêiner em modo somente leitura (`:ro`).
+
+**Comando para Windows (usando PowerShell):**
+```powershell
+docker run -p 8501:8501 --env-file .env -v ${PWD}/credentials.json:/app/credentials.json:ro literagent
+```
+
+**Comando para Linux/macOS:**
+```bash
+docker run -p 8501:8501 --env-file .env -v "$(pwd)/credentials.json:/app/credentials.json:ro" literagent
+```
+
+Após executar o comando, acesse `http://localhost:8501` no seu navegador.
+
 ## Estrutura do Projeto
 
--   `Assistente_livros.py`: O arquivo principal da aplicação Streamlit.
+-   `literagent.py`: O arquivo principal da aplicação Streamlit.
+-   `Dockerfile`: Receita para construir a imagem Docker da aplicação.
 -   `requirements.txt`: Lista de dependências do projeto.
--   `.gitignore`: Arquivo para ignorar arquivos sensíveis e desnecessários.
+-   `.gitignore`: Arquivo para ignorar arquivos sensíveis na submissão para o Git.
+-   `.dockerignore`: Arquivo para ignorar arquivos sensíveis na construção da imagem Docker.
 -   `.env`: (Ignorado pelo Git) Arquivo para armazenar a `GOOGLE_API_KEY`.
 -   `credentials.json`: (Ignorado pelo Git) Chave de acesso para a API do Google Drive.
 -   `faiss_index/`: (Ignorado pelo Git) Pasta onde o índice de vetores é salvo.

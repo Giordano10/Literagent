@@ -24,7 +24,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
-# Carrega as variáveis de ambiente do arquivo .env
+# Carrega as variáveis de ambiente do arquivo .env (para desenvolvimento local)
 load_dotenv()
 
 # --- CONSTANTES ---
@@ -35,9 +35,24 @@ SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 GDRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1wYDn0Bvscp8zMmIJwf3q-uPT4VowDCU8?usp=drive_link"
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Assistente de Livros", page_icon="📚", layout="wide")
+st.set_page_config(page_title="LiterAgent", page_icon="📚", layout="wide")
 
-# --- GOOGLE DRIVE & LÓGICA DE DADOS ---
+# --- GERENCIAMENTO DE SECRETS ---
+def manage_secrets():
+    """Gerencia chaves para ambientes locais e de nuvem (Streamlit Cloud)."""
+    # Prioriza os segredos do Streamlit Cloud se disponível
+    if hasattr(st, 'secrets') and "GOOGLE_API_KEY" in st.secrets:
+        api_key = st.secrets["GOOGLE_API_KEY"]
+        # Se estiver na nuvem, cria o credentials.json a partir dos segredos
+        if "gcp_service_account" in st.secrets and not os.path.exists(CREDENTIALS_FILE):
+            with open(CREDENTIALS_FILE, "w") as f:
+                json.dump(st.secrets["gcp_service_account"], f)
+        return api_key
+    else:
+        # Fallback para o arquivo .env (ambiente local)
+        return os.getenv("GOOGLE_API_KEY")
+
+# --- LÓGICA DE DADOS ---
 
 def authenticate_gdrive():
     """Autentica na API do Google Drive."""
@@ -52,12 +67,10 @@ def authenticate_gdrive():
         return None
 
 def get_folder_id_from_url(url):
-    """Extrai o ID da pasta de uma URL do Google Drive."""
     match = re.search(r'/folders/([a-zA-Z0-9_-]+)', url)
     return match.group(1) if match else None
 
 def list_gdrive_files(service, folder_id):
-    """Lista os arquivos PDF em uma pasta do Google Drive."""
     try:
         query = f"'{folder_id}' in parents and mimeType='application/pdf' and trashed=false"
         results = service.files().list(q=query, pageSize=100, fields="nextPageToken, files(id, name, modifiedTime)").execute()
@@ -67,7 +80,6 @@ def list_gdrive_files(service, folder_id):
         return {}
 
 def download_gdrive_files_as_streams(service, file_ids):
-    """Baixa arquivos do Drive e retorna como streams de bytes."""
     streams = []
     for file_id in file_ids:
         request = service.files().get_media(fileId=file_id)
@@ -81,18 +93,15 @@ def download_gdrive_files_as_streams(service, file_ids):
     return streams
 
 def load_manifest():
-    """Carrega o manifesto de arquivos processados."""
     return json.load(open(FAISS_MANIFEST_FILE, 'r')) if os.path.exists(FAISS_MANIFEST_FILE) else {}
 
 def save_manifest(data):
-    """Salva o manifesto de arquivos processados."""
     with open(FAISS_MANIFEST_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
 # --- FUNÇÕES CORE ---
 
 def get_pdf_text(pdf_docs_streams):
-    """Extrai texto de uma lista de streams de PDF."""
     text = ""
     for pdf_stream in pdf_docs_streams:
         with fitz.open(stream=pdf_stream.read(), filetype="pdf") as doc:
@@ -100,59 +109,43 @@ def get_pdf_text(pdf_docs_streams):
     return text
 
 def get_text_chunks(text):
-    """Divide o texto em chunks."""
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=2500, chunk_overlap=200, length_function=len)
     return text_splitter.split_text(text)
 
 def get_conversational_rag_chain(vector_store, api_key, temperature):
-    """Cria a cadeia de conversação RAG com a temperatura especificada."""
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=api_key, temperature=temperature)
     retriever = vector_store.as_retriever()
-    contextualize_q_prompt = ChatPromptTemplate.from_messages([
-        ("system", "Dado um histórico de chat e a última pergunta do usuário... reformule a pergunta para ser independente."),
-        MessagesPlaceholder("chat_history"),
-        ("human", "{input}"),
-    ])
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([("system", "... reformule a pergunta ..."), MessagesPlaceholder("chat_history"), ("human", "{input}")])
     history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
-    qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", "Você é um assistente especialista... Use o seguinte contexto para responder.\nContexto: {context}"),
-        MessagesPlaceholder("chat_history"),
-        ("human", "{input}"),
-    ])
+    qa_prompt = ChatPromptTemplate.from_messages([("system", "... Use o contexto para responder.\nContexto: {context}"), MessagesPlaceholder("chat_history"), ("human", "{input}")])
     question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
     rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-    return RunnableWithMessageHistory(
-        rag_chain, lambda session_id: StreamlitChatMessageHistory(key="chat_history"),
-        input_messages_key="input", history_messages_key="chat_history", output_messages_key="answer",
-    )
+    return RunnableWithMessageHistory(rag_chain, lambda s_id: StreamlitChatMessageHistory(key="chat_history"), input_messages_key="input", history_messages_key="chat_history", output_messages_key="answer")
 
 # --- INTERFACE DO STREAMLIT ---
 
-st.header("Assistente de Livros 📚")
+st.header("LiterAgent 📚")
 st.write("Converse com seus documentos do Google Drive.")
 
 if "conversation" not in st.session_state:
     st.session_state.conversation = None
 
-api_key = os.getenv("GOOGLE_API_KEY")
+api_key = manage_secrets()
 
 with st.sidebar:
     st.subheader("Configuração")
     if api_key:
-        st.success("API Key do Google carregada do .env!")
+        st.success("API Key do Google carregada!")
     else:
-        st.error("API Key do Google não encontrada no .env!")
+        st.error("API Key do Google não configurada.")
+        st.info("Configure-a no seu arquivo .env ou nos Secrets do Streamlit Cloud.")
         st.stop()
 
     st.subheader("Ajuste de Criatividade")
-    model_temperature = st.slider(
-        "Temperatura do Modelo", min_value=0.0, max_value=1.0, value=0.3, step=0.05,
-        help="Valores baixos são mais factuais; valores altos são mais criativos."
-    )
+    model_temperature = st.slider("Temperatura", 0.0, 1.0, 0.3, 0.05, help="Baixo: factual. Alto: criativo.")
 
     embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=api_key)
     
-    # Recria a cadeia de conversação a cada interação para capturar a nova temperatura
     if os.path.exists(FAISS_INDEX_PATH):
         try:
             vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
