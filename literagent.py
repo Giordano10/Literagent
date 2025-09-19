@@ -46,7 +46,9 @@ def manage_secrets():
         # Se estiver na nuvem, cria o credentials.json a partir dos segredos
         if "gcp_service_account" in st.secrets and not os.path.exists(CREDENTIALS_FILE):
             with open(CREDENTIALS_FILE, "w") as f:
-                json.dump(st.secrets["gcp_service_account"], f)
+                # Convertendo o objeto de secrets para um dicionário antes de salvar
+                credentials_dict = dict(st.secrets["gcp_service_account"])
+                json.dump(credentials_dict, f)
         return api_key
     else:
         # Fallback para o arquivo .env (ambiente local)
