@@ -7,7 +7,7 @@ import io
 # Import functions from your Streamlit app file.
 # Ensure this test file is in the same directory as Assistente_livros.py
 # or that the path is configured correctly.
-from Assistente_livros import (
+from literagent import (
     get_pdf_text,
     get_text_chunks,
     get_vector_store,
