@@ -117,11 +117,19 @@ def get_text_chunks(text):
     return text_splitter.split_text(text)
 
 def get_conversational_rag_chain(vector_store, api_key, temperature):
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key=api_key, temperature=temperature)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", google_api_key=api_key, temperature=temperature)
     retriever = vector_store.as_retriever()
-    contextualize_q_prompt = ChatPromptTemplate.from_messages([("system", "... reformule a pergunta ..."), MessagesPlaceholder("chat_history"), ("human", "{input}")])
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
+        ("system", "Dada uma conversa e uma pergunta de acompanhamento, reformule a pergunta de acompanhamento para ser uma pergunta independente, em seu idioma original."),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}")
+    ])
     history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
-    qa_prompt = ChatPromptTemplate.from_messages([("system", "... Use o contexto para responder.\nContexto: {context}"), MessagesPlaceholder("chat_history"), ("human", "{input}")])
+    qa_prompt = ChatPromptTemplate.from_messages([
+        ("system", "Você é um assistente de resposta a perguntas. Use somente o contexto fornecido para responder à pergunta. Se a resposta não estiver no contexto, diga que você não tem a informação. Não use conhecimento externo.\n\nContexto: {context}"),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}")
+    ])
     question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
     rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
     return RunnableWithMessageHistory(rag_chain, lambda s_id: StreamlitChatMessageHistory(key="chat_history"), input_messages_key="input", history_messages_key="chat_history", output_messages_key="answer")
