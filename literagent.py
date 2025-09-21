@@ -25,7 +25,6 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
 # --- VOICE INPUT IMPORTS ---
-from st_audiorec import st_audiorec
 import speech_recognition as sr
 from streamlit.errors import StreamlitSecretNotFoundError
 
@@ -149,14 +148,13 @@ with st.sidebar:
         st.stop()
 
     st.subheader("Digitação por Voz")
-    audio_data = st_audiorec()
+    audio_data = st.audio_input("Grave sua pergunta aqui...")
 
     if audio_data is not None:
         with st.spinner("Transcrevendo áudio..."):
             r = sr.Recognizer()
             try:
-                audio_file = io.BytesIO(audio_data)
-                with sr.AudioFile(audio_file) as source:
+                with sr.AudioFile(io.BytesIO(audio_data.read())) as source:
                     audio = r.record(source)
                 st.session_state.user_question = r.recognize_google(audio, language='pt-BR')
             except sr.UnknownValueError:
