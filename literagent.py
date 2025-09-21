@@ -24,6 +24,11 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 
+# --- VOICE INPUT IMPORTS ---
+from st_audiorec import st_audiorec
+import speech_recognition as sr
+from streamlit.errors import StreamlitSecretNotFoundError
+
 # Carrega as variáveis de ambiente do arquivo .env (para desenvolvimento local)
 load_dotenv()
 
@@ -40,19 +45,17 @@ st.set_page_config(page_title="LiterAgent", page_icon="📚", layout="wide")
 # --- GERENCIAMENTO DE SECRETS ---
 def manage_secrets():
     """Gerencia chaves para ambientes locais e de nuvem (Streamlit Cloud)."""
-    # Prioriza os segredos do Streamlit Cloud se disponível
-    if hasattr(st, 'secrets') and "GOOGLE_API_KEY" in st.secrets:
-        api_key = st.secrets["GOOGLE_API_KEY"]
-        # Se estiver na nuvem, cria o credentials.json a partir dos segredos
-        if "gcp_service_account" in st.secrets and not os.path.exists(CREDENTIALS_FILE):
-            with open(CREDENTIALS_FILE, "w") as f:
-                # Convertendo o objeto de secrets para um dicionário antes de salvar
-                credentials_dict = dict(st.secrets["gcp_service_account"])
-                json.dump(credentials_dict, f)
-        return api_key
-    else:
-        # Fallback para o arquivo .env (ambiente local)
-        return os.getenv("GOOGLE_API_KEY")
+    try:
+        if "GOOGLE_API_KEY" in st.secrets:
+            api_key = st.secrets["GOOGLE_API_KEY"]
+            if "gcp_service_account" in st.secrets and not os.path.exists(CREDENTIALS_FILE):
+                with open(CREDENTIALS_FILE, "w") as f:
+                    credentials_dict = dict(st.secrets["gcp_service_account"])
+                    json.dump(credentials_dict, f)
+            return api_key
+    except StreamlitSecretNotFoundError:
+        pass
+    return os.getenv("GOOGLE_API_KEY")
 
 # --- LÓGICA DE DADOS ---
 
@@ -131,6 +134,8 @@ st.write("Converse com seus documentos do Google Drive.")
 
 if "conversation" not in st.session_state:
     st.session_state.conversation = None
+if "user_question" not in st.session_state:
+    st.session_state.user_question = ""
 
 api_key = manage_secrets()
 
@@ -142,6 +147,23 @@ with st.sidebar:
         st.error("API Key do Google não configurada.")
         st.info("Configure-a no seu arquivo .env ou nos Secrets do Streamlit Cloud.")
         st.stop()
+
+    st.subheader("Digitação por Voz")
+    audio_data = st_audiorec()
+
+    if audio_data is not None:
+        with st.spinner("Transcrevendo áudio..."):
+            r = sr.Recognizer()
+            try:
+                audio_file = io.BytesIO(audio_data)
+                with sr.AudioFile(audio_file) as source:
+                    audio = r.record(source)
+                st.session_state.user_question = r.recognize_google(audio, language='pt-BR')
+            except sr.UnknownValueError:
+                st.warning("Não foi possível entender o áudio.")
+            except sr.RequestError as e:
+                st.error(f"Erro na requisição ao Google Speech Recognition: {e}")
+
 
     st.subheader("Ajuste de Criatividade")
     model_temperature = st.slider("Temperatura", 0.0, 1.0, 0.3, 0.05, help="Baixo: factual. Alto: criativo.")
@@ -201,13 +223,27 @@ for msg in st.session_state.get("chat_history", []):
     with st.chat_message(msg.type):
         st.markdown(msg.content)
 
-if user_question := st.chat_input("Qual a sua pergunta?"):
+user_question_from_input = st.chat_input("Qual a sua pergunta?")
+
+# Check if there is a question from voice input
+user_question_from_voice = st.session_state.get("user_question", "")
+
+# Determine the final question
+if user_question_from_input:
+    question = user_question_from_input
+elif user_question_from_voice:
+    question = user_question_from_voice
+    st.session_state.user_question = "" # Clear voice input
+else:
+    question = ""
+
+if question:
     if st.session_state.conversation:
-        with st.chat_message("user"): st.markdown(user_question)
+        with st.chat_message("user"): st.markdown(question)
         config = {"configurable": {"session_id": "streamlit_user"}}
         with st.chat_message("assistant"):
             with st.spinner("Pensando..."):
-                response = st.session_state.conversation.invoke({"input": user_question}, config)
+                response = st.session_state.conversation.invoke({"input": question}, config)
                 st.markdown(response["answer"])
     else:
         st.warning("A base de conhecimento não está carregada. Sincronize com o Drive.")
