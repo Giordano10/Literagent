@@ -7,6 +7,7 @@ A interface é construída com Streamlit e o backend utiliza os modelos de lingu
 ## Funcionalidades Principais
 
 - **Integração com Google Drive:** Conecta-se a uma pasta do Google Drive para usar seus PDFs como base de conhecimento.
+- **Busca Recursiva no Drive:** O sistema agora busca arquivos PDF de forma recursiva. Isso significa que ele irá processar arquivos localizados tanto na pasta principal do Google Drive quanto em qualquer subpasta que você criar dentro dela.
 - **Sincronização Inteligente:** Processa apenas arquivos novos ou modificados, evitando reprocessamento desnecessário a cada execução.
 - **Base de Conhecimento Persistente:** Salva o índice de vetores (FAISS) localmente para um carregamento rápido e eficiente.
 - **Chat com Memória:** Mantém o contexto da conversa atual para permitir perguntas de acompanhamento.
