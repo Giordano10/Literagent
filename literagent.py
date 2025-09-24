@@ -74,11 +74,33 @@ def get_folder_id_from_url(url):
     match = re.search(r'/folders/([a-zA-Z0-9_-]+)', url)
     return match.group(1) if match else None
 
-def list_gdrive_files(service, folder_id):
+def list_gdrive_files_recursively(service, folder_id):
+    """Lista arquivos PDF recursivamente a partir de uma pasta no Google Drive."""
+    all_files = {}
     try:
-        query = f"'{folder_id}' in parents and mimeType='application/pdf' and trashed=false"
-        results = service.files().list(q=query, pageSize=100, fields="nextPageToken, files(id, name, modifiedTime)").execute()
-        return {item['id']: {'name': item['name'], 'modified_time': item['modifiedTime']} for item in results.get('files', [])}
+        page_token = None
+        while True:
+            query = f"'{folder_id}' in parents and trashed=false"
+            results = service.files().list(
+                q=query,
+                pageSize=100,
+                fields="nextPageToken, files(id, name, mimeType, modifiedTime)",
+                pageToken=page_token
+            ).execute()
+            
+            items = results.get('files', [])
+            for item in items:
+                if item['mimeType'] == 'application/vnd.google-apps.folder':
+                    # Se é uma pasta, chama a função recursivamente para a subpasta
+                    all_files.update(list_gdrive_files_recursively(service, item['id']))
+                elif item['mimeType'] == 'application/pdf':
+                    # Se é um PDF, adiciona ao dicionário
+                    all_files[item['id']] = {'name': item['name'], 'modified_time': item['modifiedTime']}
+            
+            page_token = results.get('nextPageToken', None)
+            if page_token is None:
+                break
+        return all_files
     except HttpError as e:
         st.error(f"Erro ao listar arquivos do Drive: {e}")
         return {}
@@ -194,7 +216,7 @@ with st.sidebar:
             with st.spinner("Sincronizando com Google Drive..."):
                 gdrive_service = authenticate_gdrive()
                 if gdrive_service:
-                    drive_files = list_gdrive_files(gdrive_service, folder_id)
+                    drive_files = list_gdrive_files_recursively(gdrive_service, folder_id)
                     manifest = load_manifest()
                     files_to_process = {fid: finfo for fid, finfo in drive_files.items() if fid not in manifest or datetime.fromisoformat(finfo['modified_time'][:-1]) > datetime.fromisoformat(manifest[fid]['modified_time'][:-1])}
                     
