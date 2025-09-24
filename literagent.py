@@ -138,8 +138,8 @@ def get_text_chunks(text):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=2500, chunk_overlap=200, length_function=len)
     return text_splitter.split_text(text)
 
-def get_conversational_rag_chain(vector_store, api_key, temperature):
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", google_api_key=api_key, temperature=temperature)
+def get_conversational_rag_chain(vector_store, api_key, temperature, model_name):
+    llm = ChatGoogleGenerativeAI(model=model_name, google_api_key=api_key, temperature=temperature)
     retriever = vector_store.as_retriever()
     contextualize_q_prompt = ChatPromptTemplate.from_messages([
         ("system", "Dada uma conversa e uma pergunta de acompanhamento, reformule a pergunta de acompanhamento para ser uma pergunta independente, em seu idioma original."),
@@ -192,19 +192,37 @@ with st.sidebar:
             except sr.RequestError as e:
                 st.error(f"Erro na requisição ao Google Speech Recognition: {e}")
 
+    st.subheader("Ajustes do Modelo")
+    
+    model_list = [
+        "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+        "gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"
+    ]
+    selected_model = st.selectbox(
+        "Modelo Gemini", model_list, help="Escolha o modelo para geração de respostas."
+    )
+    
+    model_temperature = st.slider(
+        "Temperatura (Criatividade)", 0.0, 1.0, 0.3, 0.05, help="Baixo: factual. Alto: criativo."
+    )
 
-    st.subheader("Ajuste de Criatividade")
-    model_temperature = st.slider("Temperatura", 0.0, 1.0, 0.3, 0.05, help="Baixo: factual. Alto: criativo.")
-
+    # --- Lógica de Carregamento e Criação da Chain ---
+    vector_store = None
     embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=api_key)
     
     if os.path.exists(FAISS_INDEX_PATH):
         try:
             vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
-            st.session_state.conversation = get_conversational_rag_chain(vector_store, api_key, model_temperature)
         except Exception as e:
             st.error(f"Erro ao carregar base local: {e}")
+            st.stop()
+    
+    if vector_store:
+        st.session_state.conversation = get_conversational_rag_chain(
+            vector_store, api_key, model_temperature, selected_model
+        )
 
+    # --- Sincronização ---
     st.subheader("Sincronizar com Google Drive")
     st.info("Pasta do Drive definida no código.")
 
@@ -229,17 +247,19 @@ with st.sidebar:
                         new_text_chunks = get_text_chunks(new_raw_text)
                         
                         st.write("Atualizando a base de conhecimento...")
+                        # Carrega o vector store existente para adicionar novos textos
                         if os.path.exists(FAISS_INDEX_PATH):
-                            vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
-                            vector_store.add_texts(new_text_chunks)
-                        else:
-                            vector_store = FAISS.from_texts(new_text_chunks, embedding=embeddings)
+                            vector_store_to_update = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
+                            vector_store_to_update.add_texts(new_text_chunks)
+                            vector_store_to_update.save_local(FAISS_INDEX_PATH)
+                        else: # Cria um novo se não existir
+                            new_vector_store = FAISS.from_texts(new_text_chunks, embedding=embeddings)
+                            new_vector_store.save_local(FAISS_INDEX_PATH)
                         
-                        vector_store.save_local(FAISS_INDEX_PATH)
                         save_manifest(drive_files)
-                        st.session_state.conversation = get_conversational_rag_chain(vector_store, api_key, model_temperature)
                         st.success("Base de conhecimento atualizada!")
                         st.rerun()
+
 
 # --- ÁREA DE CHAT ---
 st.subheader("Chat")
